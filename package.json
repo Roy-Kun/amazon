@@ -1,0 +1,19 @@
+{
+  "name": "amazon-sorftime-selector",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Amazon US category-page product research workflow enriched by Sorftime data.",
+  "scripts": {
+    "test": "node --test",
+    "collect": "node src/cli.ts collect",
+    "evaluate": "node src/cli.ts evaluate",
+    "serve": "node src/cli.ts serve"
+  },
+  "dependencies": {
+    "playwright": "^1.55.0"
+  },
+  "engines": {
+    "node": ">=22.5"
+  }
+}
