@@ -55,3 +55,25 @@ test("recognizes SellerSprite aliases and rendered data markers", () => {
   assert.equal(providerDataLoaded("sellersprite", "评分数 219 月销量 761"), true);
   assert.equal(providerDataLoaded("sorftime", "Listing月销量：761"), true);
 });
+
+test("parses SellerSprite 5.0 parent and child 30-day sales labels", () => {
+  const parsed = parseCard({
+    asin: "B0SELLER02",
+    title: "Solid garden accessory",
+    productUrl: "https://www.amazon.com/dp/B0SELLER02",
+    imageUrl: null,
+    sponsored: false,
+    text: `价格:$41.17
+近30天销量(父体):3,000+
+近30天销量(子体):1,000+`
+  }, {
+    category: "Garden",
+    categoryUrl: "https://www.amazon.com/s?i=garden",
+    page: 1,
+    retryCount: 0,
+    provider: "sellersprite"
+  });
+
+  assert.equal(parsed.listingMonthlySales, 1000);
+  assert.equal(parsed.asinMonthlySales, 3000);
+});

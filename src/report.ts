@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
 import type { EvaluatedCandidate } from "./domain.ts";
+import { resolveProjectPath } from "./paths.ts";
 
 function csvCell(value: unknown): string {
   const text = value == null ? "" : typeof value === "string" ? value : JSON.stringify(value);
@@ -8,10 +8,10 @@ function csvCell(value: unknown): string {
 }
 
 export function writeReports(categoryName: string, categoryUrl: string, candidates: EvaluatedCandidate[]): { json: string; csv: string } {
-  mkdirSync(resolve("artifacts"), { recursive: true });
+  mkdirSync(resolveProjectPath("artifacts"), { recursive: true });
   const safeName = categoryName.replace(/[^a-z0-9\u4e00-\u9fff_-]+/gi, "-").replace(/^-|-$/g, "") || "category";
-  const jsonPath = resolve("artifacts", `${safeName}-top50.json`);
-  const csvPath = resolve("artifacts", `${safeName}-top50.csv`);
+  const jsonPath = resolveProjectPath(`artifacts/${safeName}-top50.json`);
+  const csvPath = resolveProjectPath(`artifacts/${safeName}-top50.csv`);
   writeFileSync(jsonPath, JSON.stringify({ categoryName, categoryUrl, generatedAt: new Date().toISOString(), candidates }, null, 2), "utf8");
   const headers = [
     "rank", "dataProvider", "asin", "parentAsin", "title", "productUrl", "mainPrice", "effectivePrice",

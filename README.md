@@ -4,7 +4,8 @@
 
 ## 已实现
 
-- Sorftime与卖家精灵双适配器，使用独立Chrome资料和SQLite数据库；
+- Sorftime与卖家精灵双适配器，使用持久化Chrome资料和独立SQLite数据库；
+- 常驻Chrome自动启动与CDP附着，跨任务保留插件和登录状态；
 - 类目最多400页、真实下一页点击、SQLite断点续跑；
 - 插件动态渲染等待、懒加载滚动、关键字段重试两次；
 - 液体/膏体/粉末/儿童用品、价格、销量、评论、尺寸重量、Amazon自营、FBA费率硬规则；
@@ -30,19 +31,19 @@ pnpm install
 # 或 npm install
 ```
 
-复制 `.env.example` 为 `.env`，按需填写。数据库、专用Chrome资料和报告默认写入被Git忽略的 `data/` 与 `artifacts/`。
+复制 `.env.example` 为 `.env`，按需填写。所有相对路径均以项目根目录解析；数据库、Chrome资料和报告默认写入被Git忽略的 `data/` 与 `artifacts/`。
 
 ## 卖家精灵版本
 
 卖家精灵官方的“快速预览”允许自定义列表页展示字段。首次使用前，请在快速预览中启用这些列：月销量、父体月销量（若提供）、评分、评分数、品牌、Buy Box卖家、卖家数、变体数、BSR、FBA费、上架日期、包装尺寸和包装重量。缺少硬筛所需字段时，商品会在两次重试后进入人工复核池。
 
-初始化卖家精灵专用浏览器：
+初始化卖家精灵常驻浏览器：
 
 ```bash
 node src/cli.ts profile --provider sellersprite
 ```
 
-在打开的Chrome中安装并登录卖家精灵、登录Amazon，完成后回到终端按 `Ctrl+C`。
+命令会优先附着 `http://127.0.0.1:9222`；端口未开启时，自动使用 `data/automation-chrome` 启动Chrome。命令返回后Chrome仍保持运行。首次使用时在这个窗口安装并登录卖家精灵、登录Amazon，后续采集会复用同一窗口和登录状态。
 
 采集类目：
 
@@ -90,13 +91,24 @@ node src/cli.ts evaluate --url "https://www.amazon.com/你的类目URL" --catego
 
 `--with-browser` 会读取前100个候选的1–3星评论。未设置 `OPENAI_API_KEY` 时仍可运行，但图片判断和结构创新建议不会自动生成。
 
-## 附着已有Chrome
+## 常驻Chrome与资料复用
 
-如果Chrome已通过远程调试端口开放（例如 `127.0.0.1:9222`），可直接附着到已登录并安装对应插件的浏览器，而不启动新资料：
+默认配置如下；可在 `.env` 中覆盖：
+
+```env
+BROWSER_MODE=cdp
+CHROME_CDP_URL=http://127.0.0.1:9222
+CHROME_EXECUTABLE_PATH=C:\Program Files\Google\Chrome\Application\chrome.exe
+SELLERSPRITE_PROFILE_DIR=./data/automation-chrome
+```
+
+程序会先附着已运行的Chrome；连接失败时自动用固定资料目录启动Chrome。任务结束只断开自动化连接，不关闭浏览器。也可以临时覆盖连接地址：
 
 ```bash
 node src/cli.ts collect --provider sellersprite --url "https://www.amazon.com/你的类目URL" --category "Pet Supplies" --max-pages 5 --cdp-url "http://127.0.0.1:9222"
 ```
+
+如果提示资料目录被占用，说明同一资料已被一个未开启调试端口的Chrome使用。关闭该Chrome后重新执行命令，程序会以9222端口自动启动并继续复用它。
 
 打开人工审核页时沿用采集时的 `--provider`：
 

@@ -79,9 +79,9 @@ export function parseCard(
   const weightLb = numberFrom(first(text, /(?:包装重量|商品重量|重量|package weight|item weight|weight)\s*[:：]?\s*([\d,.]+)\s*(?:lb|lbs|磅)/i));
   const parentAsin = first(text, /(?:父ASIN|parent ASIN)\s*[:：]?\s*([A-Z0-9]{10})/i) ?? raw.asin;
   const brandLower = brand?.toLocaleLowerCase("en-US") ?? "";
-  const sellerSpriteMonthlySales = labeledNumber(text, "子体月销量|ASIN月销量|近30天销量")
+  const sellerSpriteMonthlySales = labeledNumber(text, "子体月销量|ASIN月销量|近30天销量(?:[（(]子体[）)])?")
     ?? lineLabeledNumber(text, "月销量|Monthly sales");
-  const sellerSpriteParentSales = labeledNumber(text, "父体月销量|父ASIN月销量|Listing月销量|总月销量|Parent monthly sales");
+  const sellerSpriteParentSales = labeledNumber(text, "父体月销量|父ASIN月销量|Listing月销量|总月销量|近30天销量[（(]父体[）)]|Parent monthly sales");
   const listingMonthlySales = provider === "sellersprite"
     ? sellerSpriteMonthlySales
     : labeledNumber(text, "Listing月销量|Listing monthly sales");

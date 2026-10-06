@@ -6,9 +6,11 @@ import { evaluateCategory } from "./pipeline.ts";
 import { writeReports } from "./report.ts";
 import { startReviewServer } from "./server.ts";
 import { parseProvider, providerName } from "./providers.ts";
+import { resolveProjectPath } from "./paths.ts";
 
-if (existsSync(".env")) {
-  try { process.loadEnvFile(".env"); } catch { /* Environment variables can still be supplied externally. */ }
+const envPath = resolveProjectPath(".env");
+if (existsSync(envPath)) {
+  try { process.loadEnvFile(envPath); } catch { /* Environment variables can still be supplied externally. */ }
 }
 
 function argumentsMap(values: string[]): Map<string, string> {
@@ -39,11 +41,11 @@ Amazon 前台插件自动选品（Sorftime / 卖家精灵）
   node src/cli.ts serve --provider sellersprite --url URL [--port 4310]
 
 --provider: sorftime（默认）或 sellersprite（卖家精灵）。
-profile: 打开对应工具的专用Chrome，手工安装/登录插件和Amazon。
+profile: 自动启动或附着常驻Chrome，打开Amazon后立即返回，浏览器继续运行。
 collect: 自动翻页、解析并断点保存。
 evaluate: 执行规则、评分、AI分析并导出前50。--with-browser会抓取1–3星评论。
 serve: 打开本地人工审核页面。
---cdp-url: 附着到已登录Chrome的远程调试端口，不会关闭该浏览器。
+--cdp-url: 覆盖CHROME_CDP_URL；未运行时会用固定资料自动启动Chrome，任务结束不会关闭浏览器。
 `);
 }
 
@@ -51,14 +53,15 @@ async function main(): Promise<void> {
   const [command, ...rest] = process.argv.slice(2);
   const args = argumentsMap(rest);
   const provider = parseProvider(args.get("provider") ?? process.env.DATA_PROVIDER);
-  const profileDir = args.get("profile")
+  const profileDir = resolveProjectPath(args.get("profile")
     || (provider === "sellersprite" ? process.env.SELLERSPRITE_PROFILE_DIR : process.env.CHROME_PROFILE_DIR)
-    || (provider === "sellersprite" ? "./data/chrome-profile-sellersprite" : "./data/chrome-profile");
+    || (provider === "sellersprite" ? "./data/automation-chrome" : "./data/chrome-profile"));
+  const cdpUrl = args.get("cdp-url");
   if (!command || command === "help" || command === "--help") return help();
-  if (command === "profile") return setupProviderProfile(profileDir, provider);
+  if (command === "profile") return setupProviderProfile(profileDir, provider, cdpUrl);
 
   const database = new SelectorDatabase(
-    process.env.DATABASE_PATH || (provider === "sellersprite" ? "./data/sellersprite-selector.sqlite" : "./data/selector.sqlite")
+    resolveProjectPath(process.env.DATABASE_PATH || (provider === "sellersprite" ? "./data/sellersprite-selector.sqlite" : "./data/selector.sqlite"))
   );
   if (command === "collect") {
     await collectCategory({
@@ -66,7 +69,7 @@ async function main(): Promise<void> {
       category: required(args, "category"),
       maxPages: Number(args.get("max-pages") ?? 400),
       profileDir,
-      cdpUrl: args.get("cdp-url"),
+      cdpUrl,
       provider,
       database
     });
@@ -79,9 +82,9 @@ async function main(): Promise<void> {
     const snapshots = database.listSnapshots(categoryUrl);
     if (snapshots.length === 0) throw new Error("数据库中没有该类目的快照，请先运行collect。");
     let analyzer = createInnovationAnalyzer();
-    let browserSession: Awaited<ReturnType<typeof launchSorftimeSession>> | null = null;
+    let browserSession: Awaited<ReturnType<typeof launchBrowserSession>> | null = null;
     if (args.has("with-browser")) {
-      browserSession = await launchBrowserSession(profileDir, args.get("cdp-url"));
+      browserSession = await launchBrowserSession(profileDir, cdpUrl);
       analyzer = new BrowserEnrichingAnalyzer(browserSession.context, analyzer);
     }
     try {
@@ -105,7 +108,20 @@ async function main(): Promise<void> {
   help();
 }
 
-main().catch((error) => {
+const oneShotCommand = ["profile", "collect", "evaluate"].includes(process.argv[2] ?? "");
+
+function finish(code: number): void {
+  if (oneShotCommand) {
+    // Playwright may retain an internal CDP transport handle after disconnecting.
+    // All files/databases are closed before main resolves, so a one-shot CLI can exit
+    // without terminating the detached long-lived Chrome process.
+    setTimeout(() => process.exit(code), 10);
+    return;
+  }
+  process.exitCode = code;
+}
+
+main().then(() => finish(0)).catch((error) => {
   console.error(error instanceof Error ? error.stack ?? error.message : error);
-  process.exitCode = 1;
+  finish(1);
 });
