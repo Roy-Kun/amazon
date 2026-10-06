@@ -43,7 +43,7 @@ Amazon 前台插件自动选品（Sorftime / 卖家精灵）
 --provider: sorftime（默认）或 sellersprite（卖家精灵）。
 profile: 自动启动或附着常驻Chrome，打开Amazon后立即返回，浏览器继续运行。
 collect: 自动翻页、解析并断点保存。
-evaluate: 执行规则、评分、AI分析并导出前50。--with-browser会抓取1–3星评论。
+evaluate: 执行规则、评分、AI分析并导出Excel前50。--with-browser会抓取1–3星评论。
 serve: 打开本地人工审核页面。
 --cdp-url: 覆盖CHROME_CDP_URL；未运行时会用固定资料自动启动Chrome，任务结束不会关闭浏览器。
 `);
@@ -90,9 +90,10 @@ async function main(): Promise<void> {
     try {
       const result = await evaluateCategory(snapshots, analyzer);
       database.saveEvaluations(categoryUrl, result.all);
-      const reports = writeReports(`${category}-${provider}`, categoryUrl, result.final);
+      const reports = await writeReports(`${category}-${provider}`, categoryUrl, result.final);
       console.log(`${providerName(provider)}完成：${result.final.length}个候选，${result.review.length}个待复核`);
-      console.log(`JSON: ${reports.json}\nCSV: ${reports.csv}`);
+      console.log(`Excel: ${reports.xlsx}`);
+      console.log(`主图：已嵌入${reports.embeddedImages}张，保留链接${reports.imageFailures}张`);
     } finally {
       if (browserSession) await browserSession.close();
       database.close();

@@ -2,6 +2,7 @@ node_modules/
 .pnpm-store/
 data/
 artifacts/
+outputs/
 .env
 *.sqlite
 *.sqlite-shm

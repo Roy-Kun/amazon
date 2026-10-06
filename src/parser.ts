@@ -33,9 +33,10 @@ function lineLabeledNumber(text: string, label: string): number | null {
 }
 
 export function parseDimensions(text: string): DimensionsInches | null {
-  const value = first(text, /(?:包装尺寸|商品尺寸|尺寸|package dimensions?|product dimensions?|dimensions?)\s*[:：]?\s*([\d.]+)\s*[x×]\s*([\d.]+)\s*[x×]\s*([\d.]+)/i);
-  const full = text.match(/(?:包装尺寸|商品尺寸|尺寸|package dimensions?|product dimensions?|dimensions?)\s*[:：]?\s*([\d.]+)\s*[x×]\s*([\d.]+)\s*[x×]\s*([\d.]+)/i);
-  if (!value || !full) return null;
+  const packageDimensions = text.match(/(?:包装尺寸|package dimensions?)\s*[:：]?\s*([\d.]+)\s*[x×]\s*([\d.]+)\s*[x×]\s*([\d.]+)/i);
+  const productDimensions = text.match(/(?:商品尺寸|product dimensions?|dimensions?|尺寸)\s*[:：]?\s*([\d.]+)\s*[x×]\s*([\d.]+)\s*[x×]\s*([\d.]+)/i);
+  const full = packageDimensions ?? productDimensions;
+  if (!full) return null;
   return { length: Number(full[1]), width: Number(full[2]), height: Number(full[3]) };
 }
 
@@ -60,6 +61,20 @@ function parsePrices(text: string): { mainPrice: number | null; effectivePrice: 
   return { mainPrice, effectivePrice: coupon ?? mainPrice };
 }
 
+function parseWeightLb(text: string): number | null {
+  const packageWeight = text.match(/(?:包装重量|package weight)\s*[:：]?\s*([\d,.]+)\s*(lb|lbs|pounds?|oz|ounces?|磅|kg|kilograms?|g|grams?)/i);
+  const productWeight = text.match(/(?:商品重量|item weight|weight|重量)\s*[:：]?\s*([\d,.]+)\s*(lb|lbs|pounds?|oz|ounces?|磅|kg|kilograms?|g|grams?)/i);
+  const match = packageWeight ?? productWeight;
+  if (!match) return null;
+  const value = numberFrom(match[1]);
+  if (value == null) return null;
+  const unit = match[2].toLowerCase();
+  if (/^(?:oz|ounces?)$/.test(unit)) return value / 16;
+  if (/^(?:kg|kilograms?)$/.test(unit)) return value * 2.2046226218;
+  if (/^(?:g|grams?)$/.test(unit)) return value / 453.59237;
+  return value;
+}
+
 export function parseCard(
   raw: RawProductCard,
   context: { category: string; categoryUrl: string; page: number; retryCount: number; capturedAt?: string; provider?: DataProvider }
@@ -76,17 +91,17 @@ export function parseCard(
   const sellerSpriteBsr = labeledNumber(text, "BSR(?:大类排名)?|大类排名");
   const sellerSpriteSubRank = labeledNumber(text, "小类排名|Subcategory rank");
   const fbaFee = numberFrom(first(text, /(?:FBA费用|FBA费|FBA fee)\s*[:：]?\s*\$?\s*([\d,.]+)/i));
-  const weightLb = numberFrom(first(text, /(?:包装重量|商品重量|重量|package weight|item weight|weight)\s*[:：]?\s*([\d,.]+)\s*(?:lb|lbs|磅)/i));
+  const weightLb = parseWeightLb(text);
   const parentAsin = first(text, /(?:父ASIN|parent ASIN)\s*[:：]?\s*([A-Z0-9]{10})/i) ?? raw.asin;
   const brandLower = brand?.toLocaleLowerCase("en-US") ?? "";
   const sellerSpriteMonthlySales = labeledNumber(text, "子体月销量|ASIN月销量|近30天销量(?:[（(]子体[）)])?")
     ?? lineLabeledNumber(text, "月销量|Monthly sales");
   const sellerSpriteParentSales = labeledNumber(text, "父体月销量|父ASIN月销量|Listing月销量|总月销量|近30天销量[（(]父体[）)]|Parent monthly sales");
   const listingMonthlySales = provider === "sellersprite"
-    ? sellerSpriteMonthlySales
+    ? sellerSpriteParentSales ?? sellerSpriteMonthlySales
     : labeledNumber(text, "Listing月销量|Listing monthly sales");
   const asinMonthlySales = provider === "sellersprite"
-    ? sellerSpriteParentSales ?? sellerSpriteMonthlySales
+    ? sellerSpriteMonthlySales
     : labeledNumber(text, "ASIN月销量|ASIN monthly sales");
   const sellerSpriteRating = labeledNumber(text, "评分|星级|Rating");
   const sellerSpriteReviewCount = labeledNumber(text, "评分数|评价数|Ratings|Review count");
@@ -150,14 +165,16 @@ export async function extractRawCards(page: any): Promise<RawProductCard[]> {
     const providerTexts: string[] = [];
     const providerNodeCount = Math.min(await providerNodes.count(), 12);
     for (let providerIndex = 0; providerIndex < providerNodeCount; providerIndex += 1) {
-      const value = (await providerNodes.nth(providerIndex).innerText().catch(() => "")).trim();
+      const value = (await providerNodes.nth(providerIndex).innerText({ timeout: 2_000 }).catch(() => "")).trim();
       if (value && value !== cardText && !providerTexts.includes(value)) providerTexts.push(value);
     }
     results.push({
       asin,
-      title: (await titleLocator.innerText().catch(() => "")).trim(),
-      productUrl: await linkLocator.getAttribute("href").then((value: string | null) => value ? new URL(value, "https://www.amazon.com").href : `https://www.amazon.com/dp/${asin}`),
-      imageUrl: await imageLocator.getAttribute("src").catch(() => null),
+      title: (await titleLocator.innerText({ timeout: 2_000 }).catch(() => "")).trim(),
+      productUrl: await linkLocator.getAttribute("href", { timeout: 2_000 })
+        .catch(() => null)
+        .then((value: string | null) => value ? new URL(value, "https://www.amazon.com").href : `https://www.amazon.com/dp/${asin}`),
+      imageUrl: await imageLocator.getAttribute("src", { timeout: 2_000 }).catch(() => null),
       text: [cardText, ...providerTexts].join("\n"),
       sponsored: /\bSponsored\b|广告/i.test(cardText)
     });

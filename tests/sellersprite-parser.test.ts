@@ -37,8 +37,8 @@ FBA`
 
   assert.equal(parsed.dataProvider, "sellersprite");
   assert.equal(parsed.mainPrice, 59.99);
-  assert.equal(parsed.listingMonthlySales, 761);
-  assert.equal(parsed.asinMonthlySales, 3000);
+  assert.equal(parsed.listingMonthlySales, 3000);
+  assert.equal(parsed.asinMonthlySales, 761);
   assert.equal(parsed.rating, 4.2);
   assert.equal(parsed.reviewCount, 219);
   assert.equal(parsed.sellerCount, 2);
@@ -74,6 +74,65 @@ test("parses SellerSprite 5.0 parent and child 30-day sales labels", () => {
     provider: "sellersprite"
   });
 
-  assert.equal(parsed.listingMonthlySales, 1000);
-  assert.equal(parsed.asinMonthlySales, 3000);
+  assert.equal(parsed.listingMonthlySales, 3000);
+  assert.equal(parsed.asinMonthlySales, 1000);
+});
+
+test("parses SellerSprite pounds and ounces as pounds", () => {
+  const pounds = parseCard({
+    asin: "B0SELLER03",
+    title: "Solid pet accessory",
+    productUrl: "https://www.amazon.com/dp/B0SELLER03",
+    imageUrl: null,
+    sponsored: false,
+    text: `商品重量:8 ounces (226.8 g)
+商品尺寸:1 x 2 x 3 inches
+包装重量:4.52 pounds (2.05 kg)
+包装尺寸:8.1 x 6.2 x 1.8 inches`
+  }, {
+    category: "Pet Supplies",
+    categoryUrl: "https://www.amazon.com/s?i=pets",
+    page: 1,
+    retryCount: 0,
+    provider: "sellersprite"
+  });
+  const ounces = parseCard({
+    asin: "B0SELLER04",
+    title: "Solid pet accessory",
+    productUrl: "https://www.amazon.com/dp/B0SELLER04",
+    imageUrl: null,
+    sponsored: false,
+    text: "包装重量:8 ounces (226.8 g)"
+  }, {
+    category: "Pet Supplies",
+    categoryUrl: "https://www.amazon.com/s?i=pets",
+    page: 1,
+    retryCount: 0,
+    provider: "sellersprite"
+  });
+
+  assert.equal(pounds.weightLb, 4.52);
+  assert.deepEqual(pounds.dimensions, { length: 8.1, width: 6.2, height: 1.8 });
+  assert.equal(ounces.weightLb, 0.5);
+});
+
+test("does not replace an unavailable child sale count with parent sales", () => {
+  const parsed = parseCard({
+    asin: "B0SELLER05",
+    title: "Solid pet accessory",
+    productUrl: "https://www.amazon.com/dp/B0SELLER05",
+    imageUrl: null,
+    sponsored: false,
+    text: `近30天销量(父体):450
+近30天销量(子体):N/A`
+  }, {
+    category: "Pet Supplies",
+    categoryUrl: "https://www.amazon.com/s?i=pets",
+    page: 1,
+    retryCount: 0,
+    provider: "sellersprite"
+  });
+
+  assert.equal(parsed.listingMonthlySales, 450);
+  assert.equal(parsed.asinMonthlySales, null);
 });

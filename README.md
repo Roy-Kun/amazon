@@ -12,7 +12,7 @@
 - 类目内百分位评分、强势品牌扣分、详情页父ASIN识别与父体最佳子体去重；
 - OpenAI Responses API图像风险和低星评论微创新分析；
 - 无API密钥时的本地启发式降级；
-- JSON、CSV前50报告和本地人工审核页面；
+- Excel前50选品报告和本地人工审核页面；
 - 验收边界自动测试。
 
 AI调用使用Responses API的图片输入和严格JSON Schema结构化输出。网页文字、标题和评论均作为不可信数据，不会被当成系统指令。
@@ -24,7 +24,7 @@ AI调用使用Responses API的图片输入和严格JSON Schema结构化输出。
 - Sorftime或卖家精灵浏览器插件及有效账号；
 - 可选：`OPENAI_API_KEY`。
 
-当前项目只有浏览器控制依赖需要安装：
+项目依赖包含浏览器控制和Excel报告生成组件：
 
 ```bash
 pnpm install
@@ -56,6 +56,8 @@ node src/cli.ts collect --provider sellersprite --url "https://www.amazon.com/�
 ```bash
 node src/cli.ts evaluate --provider sellersprite --url "https://www.amazon.com/你的类目URL" --category "Pet Supplies" --with-browser
 ```
+
+执行完成后会在 `artifacts/` 生成 `类目名-数据源-选品结果.xlsx`。每个候选商品占一行，包含ASIN、产品名称、主图、商品链接、价格、月销量、预估月销售额、评论、评分、BSR、卖家与子体数量、FBA费用与费率、尺寸重量、五项评分、风险标签、微创新建议以及人工结论栏。程序会优先将主图嵌入工作簿，图片下载失败时保留可点击的主图链接，不会中断报告生成。
 
 打开卖家精灵候选审核页：
 
