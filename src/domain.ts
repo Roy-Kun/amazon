@@ -8,6 +8,7 @@ export interface DimensionsInches {
 }
 
 export interface CandidateSnapshot {
+  dataProvider?: "sorftime" | "sellersprite";
   asin: string;
   parentAsin: string;
   marketplace: "US";

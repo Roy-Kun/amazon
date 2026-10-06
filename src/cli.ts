@@ -1,10 +1,11 @@
 import { existsSync } from "node:fs";
-import { collectCategory, launchSorftimeContext, BrowserEnrichingAnalyzer, setupSorftimeProfile } from "./browser.ts";
+import { collectCategory, launchBrowserSession, BrowserEnrichingAnalyzer, setupProviderProfile } from "./browser.ts";
 import { createInnovationAnalyzer } from "./ai.ts";
 import { SelectorDatabase } from "./database.ts";
 import { evaluateCategory } from "./pipeline.ts";
 import { writeReports } from "./report.ts";
 import { startReviewServer } from "./server.ts";
+import { parseProvider, providerName } from "./providers.ts";
 
 if (existsSync(".env")) {
   try { process.loadEnvFile(".env"); } catch { /* Environment variables can still be supplied externally. */ }
@@ -30,34 +31,43 @@ function required(args: Map<string, string>, key: string): string {
 
 function help(): void {
   console.log(`
-Amazon + Sorftime 自动选品
+Amazon 前台插件自动选品（Sorftime / 卖家精灵）
 
-  node src/cli.ts profile [--profile DIR]
-  node src/cli.ts collect --url URL --category NAME [--max-pages 400] [--profile DIR]
-  node src/cli.ts evaluate --url URL --category NAME [--with-browser] [--profile DIR]
-  node src/cli.ts serve --url URL [--port 4310]
+  node src/cli.ts profile --provider sellersprite [--profile DIR]
+  node src/cli.ts collect --provider sellersprite --url URL --category NAME [--max-pages 400] [--profile DIR] [--cdp-url URL]
+  node src/cli.ts evaluate --provider sellersprite --url URL --category NAME [--with-browser] [--profile DIR] [--cdp-url URL]
+  node src/cli.ts serve --provider sellersprite --url URL [--port 4310]
 
-profile: 打开专用Chrome，手工安装/登录Sorftime和Amazon。
+--provider: sorftime（默认）或 sellersprite（卖家精灵）。
+profile: 打开对应工具的专用Chrome，手工安装/登录插件和Amazon。
 collect: 自动翻页、解析并断点保存。
 evaluate: 执行规则、评分、AI分析并导出前50。--with-browser会抓取1–3星评论。
 serve: 打开本地人工审核页面。
+--cdp-url: 附着到已登录Chrome的远程调试端口，不会关闭该浏览器。
 `);
 }
 
 async function main(): Promise<void> {
   const [command, ...rest] = process.argv.slice(2);
   const args = argumentsMap(rest);
-  const profileDir = args.get("profile") || process.env.CHROME_PROFILE_DIR || "./data/chrome-profile";
+  const provider = parseProvider(args.get("provider") ?? process.env.DATA_PROVIDER);
+  const profileDir = args.get("profile")
+    || (provider === "sellersprite" ? process.env.SELLERSPRITE_PROFILE_DIR : process.env.CHROME_PROFILE_DIR)
+    || (provider === "sellersprite" ? "./data/chrome-profile-sellersprite" : "./data/chrome-profile");
   if (!command || command === "help" || command === "--help") return help();
-  if (command === "profile") return setupSorftimeProfile(profileDir);
+  if (command === "profile") return setupProviderProfile(profileDir, provider);
 
-  const database = new SelectorDatabase();
+  const database = new SelectorDatabase(
+    process.env.DATABASE_PATH || (provider === "sellersprite" ? "./data/sellersprite-selector.sqlite" : "./data/selector.sqlite")
+  );
   if (command === "collect") {
     await collectCategory({
       categoryUrl: required(args, "url"),
       category: required(args, "category"),
       maxPages: Number(args.get("max-pages") ?? 400),
       profileDir,
+      cdpUrl: args.get("cdp-url"),
+      provider,
       database
     });
     database.close();
@@ -69,19 +79,19 @@ async function main(): Promise<void> {
     const snapshots = database.listSnapshots(categoryUrl);
     if (snapshots.length === 0) throw new Error("数据库中没有该类目的快照，请先运行collect。");
     let analyzer = createInnovationAnalyzer();
-    let context: any = null;
+    let browserSession: Awaited<ReturnType<typeof launchSorftimeSession>> | null = null;
     if (args.has("with-browser")) {
-      context = await launchSorftimeContext(profileDir);
-      analyzer = new BrowserEnrichingAnalyzer(context, analyzer);
+      browserSession = await launchBrowserSession(profileDir, args.get("cdp-url"));
+      analyzer = new BrowserEnrichingAnalyzer(browserSession.context, analyzer);
     }
     try {
       const result = await evaluateCategory(snapshots, analyzer);
       database.saveEvaluations(categoryUrl, result.all);
-      const reports = writeReports(category, categoryUrl, result.final);
-      console.log(`完成：${result.final.length}个候选，${result.review.length}个待复核`);
+      const reports = writeReports(`${category}-${provider}`, categoryUrl, result.final);
+      console.log(`${providerName(provider)}完成：${result.final.length}个候选，${result.review.length}个待复核`);
       console.log(`JSON: ${reports.json}\nCSV: ${reports.csv}`);
     } finally {
-      if (context) await context.close();
+      if (browserSession) await browserSession.close();
       database.close();
     }
     return;

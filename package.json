@@ -1,13 +1,16 @@
 {
-  "name": "amazon-sorftime-selector",
+  "name": "amazon-plugin-selector",
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Amazon US category-page product research workflow enriched by Sorftime data.",
+  "description": "Amazon US category-page product research workflow enriched by Sorftime or SellerSprite data.",
   "scripts": {
-    "test": "node --test",
+    "test": "node --test tests\\*.test.ts",
     "collect": "node src/cli.ts collect",
+    "collect:sellersprite": "node src/cli.ts collect --provider sellersprite",
     "evaluate": "node src/cli.ts evaluate",
+    "evaluate:sellersprite": "node src/cli.ts evaluate --provider sellersprite",
+    "profile:sellersprite": "node src/cli.ts profile --provider sellersprite",
     "serve": "node src/cli.ts serve"
   },
   "dependencies": {

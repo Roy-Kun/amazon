@@ -5,6 +5,7 @@ import { extractRawCards, parseCard } from "./parser.ts";
 import type { CandidateSnapshot, InnovationAnalysis } from "./domain.ts";
 import type { InnovationAnalyzer } from "./pipeline.ts";
 import type { SelectorDatabase } from "./database.ts";
+import { providerName, type DataProvider } from "./providers.ts";
 
 async function loadPlaywright(): Promise<any> {
   try {
@@ -14,30 +15,59 @@ async function loadPlaywright(): Promise<any> {
   }
 }
 
-export async function launchSorftimeContext(profileDir: string): Promise<any> {
+export interface BrowserSession {
+  context: any;
+  close(): Promise<void>;
+}
+
+export async function launchBrowserSession(profileDir: string, cdpUrl?: string): Promise<BrowserSession> {
   const { chromium } = await loadPlaywright();
+  if (cdpUrl) {
+    const browser = await chromium.connectOverCDP(cdpUrl);
+    const context = browser.contexts()[0];
+    if (!context) throw new Error("CDP浏览器没有可用上下文");
+    return {
+      context,
+      // This is an attachment to the user's already-running Chrome. Do not close it.
+      close: async () => undefined
+    };
+  }
   mkdirSync(resolve(profileDir), { recursive: true });
-  return chromium.launchPersistentContext(resolve(profileDir), {
+  const context = await chromium.launchPersistentContext(resolve(profileDir), {
     channel: "chrome",
     headless: false,
     viewport: { width: 1600, height: 1000 },
     locale: "en-US"
   });
+  return { context, close: () => context.close() };
 }
 
-export async function setupSorftimeProfile(profileDir: string): Promise<void> {
-  const context = await launchSorftimeContext(profileDir);
+export async function launchSorftimeSession(profileDir: string, cdpUrl?: string): Promise<BrowserSession> {
+  return launchBrowserSession(profileDir, cdpUrl);
+}
+
+export async function launchSorftimeContext(profileDir: string): Promise<any> {
+  return (await launchSorftimeSession(profileDir)).context;
+}
+
+export async function setupProviderProfile(profileDir: string, provider: DataProvider): Promise<void> {
+  const session = await launchBrowserSession(profileDir);
+  const { context } = session;
   const page = context.pages()[0] ?? await context.newPage();
   await page.goto("https://www.amazon.com", { waitUntil: "domcontentloaded" });
-  console.log("专用Chrome已打开。请安装并登录Sorftime、登录Amazon；完成后在终端按Ctrl+C关闭。");
+  console.log(`专用Chrome已打开。请安装并登录${providerName(provider)}、登录Amazon；完成后在终端按Ctrl+C关闭。`);
   await new Promise<void>((resolvePromise) => {
     const finish = async () => {
-      await context.close();
+      await session.close();
       resolvePromise();
     };
     process.once("SIGINT", finish);
     process.once("SIGTERM", finish);
   });
+}
+
+export async function setupSorftimeProfile(profileDir: string): Promise<void> {
+  return setupProviderProfile(profileDir, "sorftime");
 }
 
 function criticalMissing(candidate: CandidateSnapshot): boolean {
@@ -72,11 +102,13 @@ async function scrollForLazyContent(page: any): Promise<void> {
   });
 }
 
-async function waitForSorftime(page: any, timeoutMs = 15_000): Promise<void> {
+async function waitForProviderData(page: any, provider: DataProvider, timeoutMs = 15_000): Promise<void> {
   await page.waitForFunction(
-    () => [...document.querySelectorAll('[data-component-type="s-search-result"][data-asin]')]
-      .some((element) => /Listing月销量|ASIN月销量/i.test(element.textContent ?? "")),
-    undefined,
+    ({ providerValue }: { providerValue: DataProvider }) => [...document.querySelectorAll('[data-component-type="s-search-result"][data-asin]')]
+      .some((element) => providerValue === "sellersprite"
+        ? /卖家精灵|SellerSprite|月销量|月销售额|评分数|FBA费|上架日期/i.test(element.textContent ?? "")
+        : /Listing月销量|ASIN月销量/i.test(element.textContent ?? "")),
+    { providerValue: provider },
     { timeout: timeoutMs }
   ).catch(() => undefined);
 }
@@ -93,17 +125,18 @@ async function collectCurrentPage(
   page: any,
   category: string,
   categoryUrl: string,
-  pageNumber: number
+  pageNumber: number,
+  provider: DataProvider
 ): Promise<CandidateSnapshot[]> {
   const merged = new Map<string, CandidateSnapshot>();
   for (let attempt = 0; attempt <= RULES.missingDataRetries; attempt += 1) {
     await page.locator('[data-component-type="s-search-result"][data-asin]').first().waitFor({ timeout: 20_000 });
     await scrollForLazyContent(page);
-    await waitForSorftime(page);
+    await waitForProviderData(page, provider);
     const cards = await extractRawCards(page);
     const capturedAt = new Date().toISOString();
     for (const raw of cards) {
-      const parsed = parseCard(raw, { category, categoryUrl, page: pageNumber, retryCount: attempt, capturedAt });
+      const parsed = parseCard(raw, { category, categoryUrl, page: pageNumber, retryCount: attempt, capturedAt, provider });
       merged.set(parsed.asin, mergeCandidate(merged.get(parsed.asin), parsed));
     }
     if ([...merged.values()].every((candidate) => !criticalMissing(candidate))) break;
@@ -118,10 +151,32 @@ async function collectCurrentPage(
 }
 
 function resumeUrl(categoryUrl: string, pageNumber: number): string {
-  if (pageNumber <= 1) return categoryUrl;
   const url = new URL(categoryUrl);
-  url.searchParams.set("page", String(pageNumber));
+  if (pageNumber <= 1) url.searchParams.delete("page");
+  else url.searchParams.set("page", String(pageNumber));
   return url.href;
+}
+
+function pageFromUrl(categoryUrl: string): number {
+  try {
+    const value = Number(new URL(categoryUrl).searchParams.get("page") ?? "1");
+    return Number.isInteger(value) && value > 0 ? value : 1;
+  } catch {
+    return 1;
+  }
+}
+
+function sameCategoryUrl(actual: string, expected: string): boolean {
+  try {
+    const current = new URL(actual);
+    const target = new URL(expected);
+    return current.origin === target.origin
+      && current.pathname === target.pathname
+      && current.searchParams.get("i") === target.searchParams.get("i")
+      && current.searchParams.get("rh") === target.searchParams.get("rh");
+  } catch {
+    return false;
+  }
 }
 
 export async function collectCategory(options: {
@@ -129,17 +184,27 @@ export async function collectCategory(options: {
   category: string;
   maxPages?: number;
   profileDir: string;
+  cdpUrl?: string;
+  provider?: DataProvider;
   database: SelectorDatabase;
 }): Promise<void> {
+  const provider = options.provider ?? "sorftime";
   const maxPages = Math.min(options.maxPages ?? RULES.maxPages, RULES.maxPages);
   const prior = options.database.getJob(options.categoryUrl);
-  const startPage = prior && prior.status !== "completed" ? Math.max(1, prior.currentPage + 1) : 1;
-  const context = await launchSorftimeContext(options.profileDir);
-  const page = context.pages()[0] ?? await context.newPage();
+  const startPage = prior && prior.status !== "completed"
+    ? Math.max(1, prior.currentPage + 1)
+    : pageFromUrl(options.categoryUrl);
+  const session = await launchBrowserSession(options.profileDir, options.cdpUrl);
+  const { context } = session;
+  const page = context.pages().find((item: any) => sameCategoryUrl(item.url(), options.categoryUrl))
+    ?? context.pages()[0]
+    ?? await context.newPage();
   mkdirSync(resolve("artifacts"), { recursive: true });
   let lastCompletedPage = startPage - 1;
   try {
-    await page.goto(resumeUrl(options.categoryUrl, startPage), { waitUntil: "domcontentloaded" });
+    if (startPage > 1 || !sameCategoryUrl(page.url(), options.categoryUrl)) {
+      await page.goto(resumeUrl(options.categoryUrl, startPage), { waitUntil: "domcontentloaded" });
+    }
     for (let pageNumber = startPage; pageNumber <= maxPages; pageNumber += 1) {
       const blocked = await detectBlock(page);
       if (blocked) {
@@ -154,12 +219,12 @@ export async function collectCategory(options: {
         categoryUrl: options.categoryUrl, category: options.category, currentPage: pageNumber - 1,
         status: "running", message: "正在采集", updatedAt: new Date().toISOString()
       });
-      const snapshots = await collectCurrentPage(page, options.category, options.categoryUrl, pageNumber);
+      const snapshots = await collectCurrentPage(page, options.category, options.categoryUrl, pageNumber, provider);
       options.database.saveSnapshots(snapshots);
       lastCompletedPage = pageNumber;
       options.database.saveJob({
         categoryUrl: options.categoryUrl, category: options.category, currentPage: pageNumber,
-        status: "running", message: `已保存${snapshots.length}个商品`, updatedAt: new Date().toISOString()
+        status: "running", message: `${providerName(provider)}已保存${snapshots.length}个商品`, updatedAt: new Date().toISOString()
       });
 
       const next = page.locator("a.s-pagination-next:not(.s-pagination-disabled)").first();
@@ -193,7 +258,7 @@ export async function collectCategory(options: {
     }
     throw error;
   } finally {
-    await context.close();
+    await session.close();
   }
 }
 

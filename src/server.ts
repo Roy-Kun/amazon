@@ -22,6 +22,8 @@ function body(req: any): Promise<string> {
 
 function page(categoryUrl: string, candidates: any[], decisions: HumanDecision[]): string {
   const decisionMap = new Map(decisions.map((decision) => [decision.asin, decision]));
+  const provider = candidates.find((item) => item.snapshot?.dataProvider)?.snapshot.dataProvider;
+  const providerLabel = provider === "sellersprite" ? "卖家精灵" : provider === "sorftime" ? "Sorftime" : "插件";
   const cards = candidates.filter((item) => item.rank != null).map((item) => {
     const s = item.snapshot;
     const human = decisionMap.get(s.asin);
@@ -47,9 +49,9 @@ function page(categoryUrl: string, candidates: any[], decisions: HumanDecision[]
       </section>
     </article>`;
   }).join("\n");
-  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Amazon选品审核</title><style>
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Amazon插件选品审核</title><style>
     body{font:14px/1.5 system-ui;margin:0;background:#f6f7f9;color:#1f2937}header{position:sticky;top:0;background:#111827;color:#fff;padding:14px 24px;z-index:2}main{max-width:1200px;margin:auto;padding:20px}article{display:grid;grid-template-columns:55px 150px 1fr;gap:16px;background:#fff;margin:12px 0;padding:16px;border-radius:12px;box-shadow:0 1px 4px #0001}.rank{font-size:22px;font-weight:700}img{width:150px;height:150px;object-fit:contain}h2{font-size:17px;margin:0}a{color:#2563eb}form{display:flex;gap:8px;flex-wrap:wrap}input{min-width:200px}input,select,button{padding:8px;border:1px solid #cbd5e1;border-radius:6px}button{background:#7c3aed;color:#fff;border:0}@media(max-width:700px){article{grid-template-columns:40px 1fr}article img{grid-column:2}}
-  </style></head><body><header>Amazon + Sorftime 选品审核 · ${escapeHtml(categoryUrl)}</header><main>${cards || "尚无已排名候选，请先运行evaluate。"}</main></body></html>`;
+  </style></head><body><header>Amazon + ${providerLabel} 选品审核 · ${escapeHtml(categoryUrl)}</header><main>${cards || "尚无已排名候选，请先运行evaluate。"}</main></body></html>`;
 }
 
 export function startReviewServer(database: SelectorDatabase, categoryUrl: string, port = 4310): void {
